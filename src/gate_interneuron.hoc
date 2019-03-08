@@ -1,0 +1,109 @@
+begintemplate Gate_Interneuron
+
+
+public is_art
+public init, topol, geom, biophys
+public synlist_P0, synlist_P1, synlist_H, syn_ctrl, x, y, z, position, connect2target
+public nclist_P0, nclist_P1, nclist_H  
+
+public soma
+
+objref synlist_P0, synlist_P1, synlist_H  // list of INPUT synapses from various populations
+objref nclist_P0, nclist_P1, nclist_H	  // list of netcon's associated with above synapse lists
+objref syn_ctrl                           // synapse to control forced (evoked) and stochastic activations
+
+create soma
+
+proc init() {
+    topol()
+    geom()
+    biophys()
+    synlist_P0 = new List()
+		synlist_P1 = new List()
+    synlist_H  = new List()
+		nclist_P0  = new List()
+		nclist_P1  = new List()
+		nclist_H   = new List()		
+    synapses()
+    x = y = z = 0 // only change via position
+}
+
+proc topol() { local i
+    soma {pt3dclear() pt3dadd(0, 0, 0, 1) pt3dadd(1, 0, 0, 1)}
+}
+
+proc geom() {
+    soma {  
+        L    = 20
+        diam = 20
+        nseg = 1 
+    }
+}
+
+proc biophys() {
+    soma {
+        //HH channels: iNat and iK
+				insert HH2 {
+        			gnabar_HH2 = 0.08
+	 				gkbar_HH2  = 0.02
+	 	  			vtraub_HH2 = -60.0
+				}				
+				
+				//intracellular Ca dynamics
+				insert CaIntraCellDyn {
+						depth_CaIntraCellDyn = 0.1
+						cai_tau_CaIntraCellDyn = 1.0
+						cai_inf_CaIntraCellDyn = 50.0e-6
+				}
+				
+				//high-voltage activated calcium current, L-type
+				insert iCaL {
+						pcabar_iCaL = 3e-5
+				}       
+				
+				//non-specific current dependent on intracellular calcium concentration
+				insert iCaAN {
+						gbar_iCaAN = 1e-5 
+				}
+				
+				ek = -70.0				
+				Ra = 150.0				
+				
+				insert pas
+				g_pas = 3.9e-5
+				e_pas = -65.0
+    }
+}
+
+proc position() { local i
+    soma for i = 0, n3d()-1 {
+        pt3dchange(i, $1-x+x3d(i), $2-y+y3d(i), $3-z+z3d(i), diam3d(i))
+    }
+    x = $1  y = $2  z = $3
+}
+
+obfunc connect2target() { localobj nc  //$o1 target point process, optional $o2 returned NetCon
+    soma nc = new NetCon(&v(1), $o1)
+    nc.threshold = 0
+    if (numarg() == 2) { $o2 = nc }    // for backward compatibility
+    return nc
+}
+
+objref syn_
+proc synapses() {
+		// P inside cluster
+		soma syn_ = new ComboSyn(0.5)
+		synlist_P0.append(syn_)
+		// P outside cluster
+		soma syn_ = new ComboSyn(0.5)
+		synlist_P1.append(syn_)
+		// Control
+		soma syn_ctrl = new ExpSyn(0.5)
+		syn_ctrl.e   = 0.0
+		syn_ctrl.tau = 1.0
+}
+
+func is_art() { return 0 }
+
+
+endtemplate Gate_Interneuron

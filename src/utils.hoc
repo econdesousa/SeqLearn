@@ -1,0 +1,87 @@
+// Report network connectivity (not appropriate for large networks)
+proc tracenet() { local n, p, g  localobj src, tgt
+		// I
+		printf("\nLocal Interneurons pre-synaptic inputs:")
+		for( n=0; n < N_PRINCIPAL_NEURONS; n+=1 ) {		
+				printf("\n\tI[%d]: %s", n, I[n].nclist_P.o(0).precell() )
+		}
+		// P
+		printf("\n\nPrincipal Neurons pre-synaptic inputs:")
+		for( n=0; n < N_PRINCIPAL_NEURONS; n+=1) {						
+				printf( "\n\tP[%d]:", n )
+				printf( " %s", P[n]. nclist_I.o(0).precell() )			
+				for( p=0; p < int( (N_PRINCIPAL_NEURONS-1)*CONN_RATE ); p+=1) {
+						printf( ", %s", P[n].nclist_P.o(p).precell() )			
+				}
+				for( g=0; g < N_gate_interneurons; g+=1) {
+						printf( ", %s", P[n].nclist_G.o(g).precell() )			
+				}
+		}		
+		// G
+		printf("\n\nGate Interneurons pre-synaptic inputs:")
+		for( n=0; n < N_PRINCIPAL_NEURONS; n+=1) {						
+				for( g=0; g < N_gate_interneurons; g+=1) {
+						printf( "\n\tG[%d][%d]: %s, %s", n, g, G[n][g].nclist_P0.o(0).precell(), G[n][g].nclist_P1.o(0).precell())			
+				}
+		}
+		printf( "\n")		
+}
+
+
+// restore each generator to the start of its stream
+proc restart() { local i	
+  for i = 0, rslist.count()-1 rslist.o(i).start()
+}
+
+
+
+// use this procedure to restart the simulation and save data without exiting
+
+proc reload(){				
+	
+	restart()						// restore each generator to the start of its stream
+
+	spikes_tvec = new Vector()		// restore spikes_tvec & spikes_idvec
+	spikes_idvec = new Vector()
+	for( p=0; p < N_PRINCIPAL_NEURONS*(2+N_gate_interneurons); p+=1 ) {
+		if(p<N_PRINCIPAL_NEURONS){
+			nc = I[p].connect2target(nil)
+		}else{
+			if(p<2*N_PRINCIPAL_NEURONS){
+				nc = P[p-N_PRINCIPAL_NEURONS].connect2target(nil)
+			}else{
+				pp=p-2*N_PRINCIPAL_NEURONS
+				nc = G[int(pp/N_gate_interneurons)][pp%N_gate_interneurons].connect2target(nil)
+			}
+		}
+		nc.record( spikes_tvec, spikes_idvec, p )  // record again
+	}
+	
+	finitialize()
+
+	
+	run()
+
+
+	 							
+	fileobj = new File()							// overwrite data files
+	fileobj.wopen("out_P_spike_times.dat")
+	spikes_tvec.printf(fileobj)
+	fileobj.close()
+	 
+	fileobj = new File()
+	fileobj.wopen("out_P_spike_ids.dat")
+	spikes_idvec.printf(fileobj)
+	fileobj.close()
+
+	
+	data_size = new Vector(4)
+	data_size.x[0] = N_PRINCIPAL_NEURONS
+	data_size.x[1] = N_gate_interneurons
+	data_size.x[2] = N_PATTERNS  
+	data_size.x[3] = PATTERN_SIZE 
+	fileobj = new File()
+	fileobj.wopen("out_data_size.dat")
+	data_size.printf(fileobj)
+	fileobj.close()
+}

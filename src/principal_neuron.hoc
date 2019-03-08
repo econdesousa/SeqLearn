@@ -1,0 +1,105 @@
+begintemplate Principal_Neuron
+
+
+public is_art
+public init, topol, geom, biophys
+public synlist_I, synlist_P, synlist_G, syn_ctrl, x, y, z, position, connect2target
+public nclist_I, nclist_P, nclist_G
+
+public soma
+
+objref synlist_I, synlist_P, synlist_G  // list of INPUT synapses from various populations
+objref nclist_I, nclist_P, nclist_G		// list of netcon's associated with above synapse lists
+objref syn_ctrl                         // synapse to control forced (evoked) and stochastic activations
+
+create soma
+
+proc init() {  // called as Principal_Neuron( N_PRINCIPAL_NEURONS, N_gate_interneurons, CONN_RATE )
+    topol()
+		geom()
+    biophys()
+    synlist_I = new List()
+    synlist_P = new List()
+    synlist_G = new List()
+    nclist_I  = new List()
+    nclist_P  = new List()
+    nclist_G  = new List()
+    synapses( int( ($1-1)*$3 ), $2 )  // int( (N_PRINCIPAL_NEURONS-1) * CONN_RATE ), N_gate_interneurons :: NO SELF-CONNECTIONS
+    x = y = z = 0                     // only change via position
+}
+
+proc topol() { local i
+    soma {pt3dclear() pt3dadd(0, 0, 0, 1) pt3dadd(1, 0, 0, 1)}
+}
+
+proc geom() {
+    soma {  
+        L    = 20
+        diam = 20
+        nseg = 1 
+    }
+}
+
+proc biophys() {      
+    soma {
+        //HH channels: iNat and iK
+        insert HH2 {
+            gnabar_HH2 = 0.1
+            gkbar_HH2  = 0.02
+            vtraub_HH2 = -50.0
+        }
+        Ra = 150
+        cm = 1         
+        ek = -70.0
+        insert pas {
+            g_pas = 4.5e-5
+            e_pas = -65.0
+        } 
+    }
+}
+
+proc position() { local i
+    soma for i = 0, n3d()-1 {
+        pt3dchange(i, $1-x+x3d(i), $2-y+y3d(i), $3-z+z3d(i), diam3d(i))
+    }
+    x = $1  y = $2  z = $3
+}
+
+obfunc connect2target() { localobj nc  // $o1 target point process, optional $o2 returned NetCon
+    soma nc = new NetCon(&v(1), $o1)
+    nc.threshold = 0
+    if (numarg() == 2) { $o2 = nc }    // for backward compatibility
+    return nc
+}
+
+objref syn_
+proc synapses() {
+		// I
+    soma syn_ = new Exp2Syn(0.5)
+    syn_.tau1 = 10
+	syn_.tau2 = 200
+	syn_.e    = -85
+	
+	synlist_I.append(syn_)		
+		// P
+    for (i=0; i < $1; i+=1) {
+        soma syn_ = new ComboSyn(0.5)
+        syn_.ca_ratio = 0
+				synlist_P.append(syn_)
+    }		
+		// G
+    for (i=0; i < $2; i+=1) {
+        soma syn_ = new ComboSyn(0.5)
+        syn_.ca_ratio = 0
+				synlist_G.append(syn_)
+    }	
+		// Control
+		soma syn_ctrl = new ExpSyn(0.5)
+		syn_ctrl.e   = 0.0
+		syn_ctrl.tau = 1.0
+}
+
+func is_art() { return 0 }
+
+
+endtemplate Principal_Neuron

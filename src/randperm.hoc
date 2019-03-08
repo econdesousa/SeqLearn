@@ -1,0 +1,27 @@
+/*
+Generate a random permutation vector
+
+USAGE:
+vdest = randperm( r, N )
+vdest is a Vector() class obj
+r is a Random() class obj used to generate a random stream of values
+
+Example:
+N = 10
+objref r, vdest
+r = new Random()
+r.uniform(0.0, 1.0)
+vdest = randperm( r, N )
+vdest.printf //if you want to visualize the result
+
+Could be easily implemented using the modern version of the Fisher–Yates shuffle but since hoc has a vector sort function (hopefully computationally efficient), this saves my time...
+
+Paulo de Castro Aguiar, 2012
+pauloaguiar@fc.up.pt
+*/
+
+obfunc randperm() {localobj dummyvec
+		dummyvec = new Vector($2)
+		dummyvec.setrand($o1)
+		return dummyvec.sortindex
+}

@@ -1,0 +1,447 @@
+// Created by:
+// Eduardo Conde-Sousa [econdesousa@gmail.com]
+//        * and *
+// Paulo Castro Aguiar [pauloaguiar@fc.up.pt]
+//
+// for generation of a rasterplot similar to the one presented in Fig 6 of
+// 				Conde-Sousa, E & Aguiar, P; 
+// 				A working memory model for serial order that stores information in the intrinsic excitability properties of neurons, 
+// 				J. of Computational Neuroscience, 2013
+// The original rasterplot was created in MATLAB with data files automatically exported
+
+
+
+// During the simulation is possible to see the membrane traces of all 100 P neurons (but the simulation will become much slower).
+// The rasterplot will be automatically generated at the end of the simulation. 
+
+
+
+
+// Steps:
+// 0 - SET UP GLOBAL PARAMETERS
+// 1 - DEFINE CELL TYPES
+// 2 - CREATE CELLS
+// 3 - CONNECT CELLS
+// 4 - SET UP INSTRUMENTATION (change parameters, record results, display results)
+// 5 - SET UP CONTROLS TO RUN SIMULATION
+// 6 - RUN SIMULATION
+// 7 - EXPORT RESULTS
+
+
+
+// 0 *****************************************************************************************************
+
+
+
+// SET UP GLOBAL PARAMETERS
+time=startsw()
+celsius = 22					// [Celsius]
+TSTOP   = 16e3					// [ms]
+
+N_PRINCIPAL_NEURONS = 100		// number of principal neurons in the network; other population sizes are derived from this value (and other parameters)
+GATES_SAMPLING_FRACTION = 0.95	// a value of 1.0 means full sampling. Represents the probability that, given an ordered pair of principal neurons, there is a gate interneuron establishing the connection between them.
+CONN_RATE = 0					// probability of connection between two principal neurons [0,1] (in the paper this value is (always) set as 0)
+
+
+
+// sequence of patterns ( be sure that N_PATTERNS * PATTERN_SIZE <= N_PRINCIPAL_NEURONS )
+N_PATTERNS   = 5  		// number of patterns in the sequence
+PATTERN_SIZE = 17 		// number of activated neurons in each pattern/constellation of the sequence
+
+
+
+// spatial grid for 3D representation [um]
+SPACE_GRID_X = 50.0            // distance used to set up the spatial grid where neurons are placed (only for visualization) [um]
+SPACE_GRID_Y = 100.0           // spatial grid
+SPACE_GRID_Z = 25.0            // spatial grid
+
+
+N_gate_interneurons = int( GATES_SAMPLING_FRACTION * ( N_PRINCIPAL_NEURONS - 1 ) )	// number of gate interneurons in the network
+
+
+
+Ex_1 = N_gate_interneurons*(2*PATTERN_SIZE-1)/(N_PRINCIPAL_NEURONS-1)
+//Ex_1 represents the expected value for the number of active gate interneurons in other than the first group (receiving synaptic connections from gates linked to principal neurons in their own constellation or in the previous one)
+
+//This value is the mean value of the hypergeometric distribution of parameters:
+
+				//	N (population size)		= N_PRINCIPAL_NEURONS-1
+				//	m (subpopulation size)	= 2*PATTERN_SIZE-1 and 
+				//	k (number of draws)		= N_gate_interneurons 
+
+
+// synaptic efficacies (weights) [uS]
+wPP  = 0		//there's no synapses between principal neurons. This number, in the present configuration is worthless
+wPI  = 1.5e-3 
+wIP  = 1.2e-3
+wP0G = 1.3e-4	// P_i -> G_cluster(i)					
+wP1G = 5.0e-4	// P_i -> G_cluster(j) with j!=i		
+wGP  = 1.12e-3/Ex_1	
+
+
+
+
+// synaptic delays [ms]
+dPP  = 1.0
+dPI  = 1.0
+dIP  = 1.0
+dP0G = 1.0
+dP1G = 1.0
+dGP  = 1.0
+
+
+
+// 1 *****************************************************************************************************
+
+// DEFINE CELL TYPES
+
+{load_file("gate_interneuron.hoc")}
+{load_file("local_interneuron.hoc")}
+{load_file("principal_neuron.hoc")}
+
+
+
+// 2 *****************************************************************************************************
+
+// CREATE CELLS
+
+objref P[ N_PRINCIPAL_NEURONS ]                         // principal neurons   :: P
+objref G[ N_PRINCIPAL_NEURONS ][ N_gate_interneurons ]  // gate interneurons   :: G
+objref I[ N_PRINCIPAL_NEURONS ]                         // local interneurons  :: I
+
+
+for( n=0; n<N_PRINCIPAL_NEURONS; n+=1) {
+    P[n] = new Principal_Neuron( N_PRINCIPAL_NEURONS, N_gate_interneurons, CONN_RATE )
+		P[n].position( n*SPACE_GRID_X, 0.0, 0.0 )
+    I[n] = new Local_Interneuron()			
+		I[n].position( n*SPACE_GRID_X, SPACE_GRID_Y, 0.0 )		
+		for( g=0; g<N_gate_interneurons; g+=1) {
+				G[n][g] = new Gate_Interneuron()
+				G[n][g].position( n*SPACE_GRID_X, -SPACE_GRID_Y, -SPACE_GRID_Z * ( (N_gate_interneurons-1)/2.0 - g ) )
+		}	
+}
+
+
+// load utility functions
+{load_file("randperm.hoc")}
+{load_file("ranstream.hoc")}
+
+
+
+
+
+// 3 *****************************************************************************************************
+
+// CONNECT CELLS (it's separated from the previous for-cycles for clarity purposes only)
+
+objref nc
+objref r, RSO, perm
+
+r 	= new Random(startsw())	  // choose different seeds for different random streams
+RSO = new Random(startsw())
+
+
+
+// a convergent connectivity perspective is taken; i.e. for each cell the inputs are chosen (not the outputs)
+for( n=0; n < N_PRINCIPAL_NEURONS; n+=1) {
+		
+		// I - receives from P only
+		nc = P[n].connect2target( I[n].synlist_P.object(0) )
+		nc.delay  = dPI
+		nc.weight = wPI*(1 + r.uniform(-0.025,0.025))
+		I[n].nclist_P.append( nc )
+	
+		// P - receives from I, P and G
+		// IP
+		nc = I[n].connect2target( P[n].synlist_I.object(0) )
+		nc.delay  = dIP
+		nc.weight = wIP*(1 + r.uniform(-0.025,0.025))
+		P[n].nclist_I.append( nc )		
+		// PP
+		perm = randperm( r, N_PRINCIPAL_NEURONS )     // returns a random permutation vector of principal neuron ids
+		perm = perm.remove( perm.indwhere("==", n) )  // remove the possibility of self connections
+		for( p=0; p < int( (N_PRINCIPAL_NEURONS-1)*CONN_RATE ); p+=1) {
+				nc = P[perm.x(p)].connect2target( P[n].synlist_P.object(p) )
+				nc.delay  = dPP
+				nc.weight = wPP*(1 + r.uniform(-0.025,0.025))
+				P[n].nclist_P.append( nc )								
+		}	
+		// GP
+		for( g=0; g < N_gate_interneurons; g+=1) {
+				nc = G[n][g].connect2target( P[n].synlist_G.object(g) )
+				nc.delay  = dGP
+				nc.weight = wGP*(1 + r.uniform(-0.025,0.025))
+				P[n].nclist_G.append( nc )								
+		}	
+
+		// G - receives from P (from inside and outside the cluster)
+		perm = randperm( r, N_PRINCIPAL_NEURONS )     // returns a random permutation vector of principal neuron ids
+		perm = perm.remove( perm.indwhere("==", n) )  // remove from the permutation vector the present cluster neuron id: n
+		for( g=0; g < N_gate_interneurons; g+=1) {
+				// P0G (inside cluster)				
+				nc = P[n].connect2target( G[n][g].synlist_P0.object(0) )
+				nc.delay  = dP0G
+				nc.weight = wP0G*(1 + r.uniform(-0.025,0.025))
+				G[n][g].nclist_P0.append( nc )
+				// P1G (outside cluster)
+				nc = P[perm.x(g)].connect2target( G[n][g].synlist_P1.object(0) )
+				nc.delay  = dP1G
+				nc.weight = wP1G*(1 + r.uniform(-0.025,0.025))
+				G[n][g].nclist_P1.append( nc )
+		}
+		// of course some of these cycles could be merged
+		// but this part of the code in not critical and, in this case, readability wins over performance!
+}
+
+printf("\nNetwork setup complete in %g seconds!\n", startsw()-time)
+
+
+// 4 *****************************************************************************************************
+
+// SET UP INSTRUMENTATION (change parameters, record results, display results)
+
+// Add stochastic activations to all neurons, except H
+// ---------------------------------------------------
+
+
+
+total_stim_stochastic = N_PRINCIPAL_NEURONS -  N_PATTERNS  * PATTERN_SIZE
+objref stim_stochastic[ total_stim_stochastic ]  
+objref rs, rslist
+rslist = new List()
+objref nclist_stim_stochastic
+nclist_stim_stochastic = new List()
+
+for( s=0; s < total_stim_stochastic; s+=1) {
+		// create NetStim
+		stim_stochastic[s]				= new NetStim()
+		rs	 							= new RandomStream(s)
+		rslist.append(rs)
+		stim_stochastic[s].noiseFromRandom(rs.r)
+		rs.r.negexp(1) 					// must specify negexp distribution with mean = 1
+		rs.start()
+		stim_stochastic[s].interval		= 1000/0.3
+		stim_stochastic[s].number		= 1e3
+		stim_stochastic[s].start		= 0
+		stim_stochastic[s].noise		= 0.85		
+		// create NetCon and establish connection between NetStim and synapse, according to the target neuron type
+		nclist_stim_stochastic.append( new NetCon( stim_stochastic[s], P[N_PATTERNS  * PATTERN_SIZE+s].syn_ctrl, 0.0, 0.1, 6e-3 ) )				
+}
+
+
+
+
+// Evoke first sequence
+// --------------------
+
+//parameters setting
+freq = 17								// Input frequency
+NumbStim = 4							// Number of spikes injected to start the activity
+ConstDist = (NumbStim) * 1000 / freq	// Distance (in ms) between the starting time of two consecutive constellations; Each constellation starts after 1000/freq [ms] of the end of the previous one
+st = 500.0								// time of the onset of the activity 
+
+
+
+objref stim_evoked[ N_PATTERNS ][ PATTERN_SIZE ]
+objref nclist_stim_evoked
+nclist_stim_evoked = new List()
+for( p=0; p < N_PATTERNS; p+=1 ) {
+		for( n = 0; n < PATTERN_SIZE; n+=1 ) {
+				// create NetStim
+				random_stream_offset_			= RSO.discunif(1e3,1e4)
+				stim_evoked[p][n]				= new NetStim()
+				rs								= new RandomStream(total_stim_stochastic+p*N_PATTERNS+n)
+				rslist.append(rs)
+				stim_evoked[p][n].noiseFromRandom(rs.r)
+				rs.r.negexp(1) 								// must specify negexp distribution with mean = 1
+				rs.start()
+				stim_evoked[p][n].interval	= 1000 / freq
+				stim_evoked[p][n].number	= NumbStim
+				stim_evoked[p][n].start		= st + p * ConstDist + r.uniform( -10.0, 10.0 )
+				stim_evoked[p][n].noise		= 0//.10
+				// create NetCon and establish connection between NetStim and synapse
+				nclist_stim_evoked.append(  new NetCon( stim_evoked[p][n], P[ p * PATTERN_SIZE + n ].syn_ctrl, 0.0, 0.1, 5e-2 ) )
+		}
+}
+
+
+
+
+// Reactivate first pattern
+// ------------------------
+
+//parameters setting
+NumbStim2 = 2											// Number of spikes injected to restart the activity
+DEL = 2000												// Delay between reactivations of the sequence
+N_Reactivations = int(TSTOP / 1000)
+if (N_PATTERNS>5){DEL1=2500}else{DEL1=DEL}
+objref stim_recall[ PATTERN_SIZE ][N_Reactivations]
+objref nc, nclist_stim_recall
+nclist_stim_recall = new List()
+for( i = 0; i < N_Reactivations; i+=1) {	
+	for( n = 0; n < PATTERN_SIZE; n+=1 ) {
+			// create NetStim
+			random_stream_offset_		= RSO.discunif(1e3,1e4)
+			stim_recall[n][i]			= new NetStim()
+			rs	 						= new RandomStream(total_stim_stochastic+N_PATTERNS*PATTERN_SIZE+i*N_Reactivations+n)
+			rslist.append(rs)
+			stim_recall[n][i].noiseFromRandom(rs.r)
+			rs.r.negexp(1) // must specify negexp distribution with mean = 1
+			rs.start()
+			stim_recall[n][i].interval	= 1000 / freq
+			stim_recall[n][i].number	= NumbStim2
+			stim_recall[n][i].start 	= st + DEL1 + DEL*i + r.uniform( -10.0, 10.0 )
+			stim_recall[n][i].noise		= 0//.10
+			// create NetCon and establish connection between NetStim and synapse
+			nc = new NetCon( stim_recall[n][i], P[n].syn_ctrl, 0.0, 0.1, 5e-2 )
+			nclist_stim_recall.append( nc )
+	}
+}
+
+
+
+// Record Principal Neurons Spikes
+// -------------------------------
+objref spikes_tvec, spikes_idvec  // vectors with spike times (tvec) and the corresponding id numbers of the cells that spiked (idvec)
+objref nc, nil
+spikes_tvec = new Vector()
+spikes_idvec = new Vector()
+for( p=0; p < N_PRINCIPAL_NEURONS*(2+N_gate_interneurons); p+=1 ) {
+    if(p<N_PRINCIPAL_NEURONS){
+    	nc = I[p].connect2target(nil)
+    }else{
+    	if(p<2*N_PRINCIPAL_NEURONS){
+    		nc = P[p-N_PRINCIPAL_NEURONS].connect2target(nil)
+    	}else{
+    		pp=p-2*N_PRINCIPAL_NEURONS
+    		nc = G[int(pp/N_gate_interneurons)][pp%N_gate_interneurons].connect2target(nil)
+    	}
+    }
+    nc.record( spikes_tvec, spikes_idvec, p )  // the Vector will continue to record spike times even after the NetCon has been destroyed
+}
+
+
+
+// 5 *****************************************************************************************************
+
+// SET UP CONTROLS TO RUN SIMULATION
+
+load_file("WMSeqLearn.ses")
+
+tstop = TSTOP
+
+
+
+// 6 *****************************************************************************************************
+
+
+finitialize()
+
+objref pc
+pc = new ParallelContext()
+
+printf("\nChecking the number of available threads\n")
+
+objref vec
+vec = new Vector(9)
+for i=0,8{
+	vec.x[i] = pc.thread_how_many_proc()
+	print vec.x[i]
+	}
+vec.sort()
+pc.nthread(vec.x[4])
+
+
+//pc.nthread(8)	//uncomment previous lines and comment this one if you want to automatically check the available number of threads in your machine
+
+printf("\nNumber of used threads: %g\n", vec.x[4])
+printf("\nParallelization completed in %g seconds!\n", startsw()-time)
+
+printf("\nThis simulation takes some time! Please wait.\n")
+
+
+objref grap
+
+
+
+proc myrun() {
+  run()
+  // make a raster plot of spike times
+  //spikes_idvec.add(1) // so cell i spikes are marked at y = i+1
+  grap = new Graph(0)
+  grap.size(0,tstop,N_PRINCIPAL_NEURONS,N_PRINCIPAL_NEURONS*2)
+  grap.view(0, N_PRINCIPAL_NEURONS-1, tstop, N_PRINCIPAL_NEURONS, 47, 109, 900, 600)
+  spikes_idvec.mark(grap, spikes_tvec, "O", 3, 2, 1)
+  /*
+  // print out spike times
+  print " time         cell"
+  for i=0, tvec.size-1 printf("%7.3f \t%d\n", tvec.x(i), idvec.x(i))*/
+}
+myrun() // myrun() automatically generates a rasterplot of principal neurons. 
+		// If wanted, use view=plot to view rasterplot of all neurons (works better for smaller values of NP)
+		// Neurons with id from 0 to N_PRINCIPAL_NEURONS-1 are inhibitory interneurons
+		// Neurons with id from N_PRINCIPAL_NEURONS to 2*N_PRINCIPAL_NEURONS-1 are principal neurons
+		// All other are gate interneurons
+
+
+printf("\nSimulation completed in %g seconds!\n", startsw()-time)
+
+// 7 *****************************************************************************************************
+
+// EXPORT RESULTS
+
+// write spike times to file "out_P_spike_times.dat" and ids to "out_P_spike_ids.dat"
+
+objref fileobj 
+fileobj = new File()
+fileobj.wopen("out_P_spike_times.dat")
+spikes_tvec.printf(fileobj)
+fileobj.close()
+objref fileobj 
+fileobj = new File()
+fileobj.wopen("out_P_spike_ids.dat")
+spikes_idvec.printf(fileobj)
+fileobj.close()
+
+objref data_size, fileobj
+data_size = new Vector(4)
+data_size.x[0] = N_PRINCIPAL_NEURONS
+data_size.x[1] = N_gate_interneurons
+data_size.x[2] = N_PATTERNS  
+data_size.x[3] = PATTERN_SIZE 
+fileobj = new File()
+fileobj.wopen("out_data_size.dat")
+data_size.printf(fileobj)
+fileobj.close()
+
+
+printf("\nAll completed in %g seconds!\n", startsw()-time)
+
+// load utility functions
+{load_file("utils.hoc")}
+
+
+// MEMBRANE POTENTIAL TRACES SHOULD BE RECORDED THROUGH SESSIONS (.ses) IN ORDER TO EASILY TURN RECORDING ON/OFF
+// Recording thousands of traces, with small dt, and dynamically increasing vectors is asking for slooooww torture...
+// If the size of the vector is known, avoid initializing with vec = new Vector()
+
+
+
+
+
+
+
+//************************************************************************************
+//UNITS	    
+//Category									Variable			Units
+//Time											t				[ms]
+//Voltage										v				[mV]
+//Current										i				[mA/cm2] (distributed) [nA] (point process)
+//Concentration								ko, ki, etc.		[mM]
+//Specific capacitance							cm				[uf/cm2]
+//Length									diam, L				[um]
+//Conductance									g				[S/cm2] (distributed)	[uS] (point process)
+//Cytoplasmic resistivity						Ra				[ohm cm]
+//Resistance									Ri				[10E6 ohm]
+
+
